@@ -1,0 +1,289 @@
+<!doctype html>
+<!--
+  EMBROIDERY CYCLE-TIME TRACKER
+  =============================
+  This one file has three parts:
+    1. HTML  (the <body> section)   - WHAT is on the page: buttons, text, the list.
+    2. CSS   (the <style> section)  - how it LOOKS: colors, sizes, spacing.
+    3. JavaScript (the <script>)    - how it BEHAVES: what happens when you click.
+
+  Anything between <!-- and --> (in HTML) or after // (in JavaScript)
+  is a "comment": a note for humans that the computer ignores.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- Makes the page fit nicely on phones too -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cycle Timer</title>
+
+  <style>
+    /* ---------- PART 2: CSS (the look) ---------- */
+
+    /* Colors are kept in one place so they're easy to change later */
+    :root {
+      --bg: #faf7f2;        /* page background (soft linen) */
+      --card: #ffffff;      /* white boxes */
+      --text: #2b2b2b;      /* main text */
+      --muted: #777777;     /* lighter grey text */
+      --start: #2e8b57;     /* green Start button */
+      --stop: #c0392b;      /* red Stop button */
+      --border: #e4ded4;
+    }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, sans-serif;
+    }
+
+    main { max-width: 520px; margin: 0 auto; }
+
+    h1 { font-size: 1.5rem; margin: 8px 0 16px; }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    label { display: block; font-size: 0.9rem; color: var(--muted); margin-bottom: 4px; }
+
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      font-size: 1rem;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    /* The big running clock */
+    #clock {
+      font-size: 3rem;
+      font-variant-numeric: tabular-nums; /* keeps digits from jiggling */
+      text-align: center;
+      margin: 16px 0;
+    }
+
+    /* The big Start/Stop button */
+    #startStop {
+      width: 100%;
+      font-size: 1.4rem;
+      padding: 16px;
+      border: none;
+      border-radius: 10px;
+      color: white;
+      background: var(--start);
+      cursor: pointer;
+    }
+    #startStop.running { background: var(--stop); }
+
+    #average { font-size: 1.2rem; }
+    #average strong { font-size: 1.6rem; }
+
+    ul { list-style: none; padding: 0; margin: 0; }
+    li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    li:last-child { border-bottom: none; }
+    .when { color: var(--muted); font-size: 0.8rem; }
+
+    .small-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 8px;
+      cursor: pointer;
+      color: var(--muted);
+    }
+  </style>
+</head>
+
+<body>
+  <!-- ---------- PART 1: HTML (what's on the page) ---------- -->
+  <main>
+    <h1>🧵 Embroidery Cycle Timer</h1>
+
+    <!-- Box 1: the timer -->
+    <section class="card">
+      <label for="orderName">Order name or number (optional)</label>
+      <input id="orderName" placeholder="e.g. #1042 – 12 logo caps">
+
+      <div id="clock">00:00:00</div>
+
+      <button id="startStop">Start</button>
+    </section>
+
+    <!-- Box 2: the average -->
+    <section class="card" id="average">
+      Average time per order: <strong id="avgValue">—</strong>
+      <div class="when" id="countText">No orders recorded yet</div>
+    </section>
+
+    <!-- Box 3: the list of finished orders -->
+    <section class="card">
+      <h2 style="font-size:1.1rem;margin-top:0">Finished orders</h2>
+      <ul id="orderList"></ul>
+      <button class="small-btn" id="clearAll" style="margin-top:12px">Clear all</button>
+    </section>
+  </main>
+
+  <script>
+    // ---------- PART 3: JavaScript (how it behaves) ----------
+
+    // STEP A: Grab the pieces of the page we need to talk to.
+    // Each "id" here matches an id="..." in the HTML above.
+    const nameBox     = document.getElementById("orderName");
+    const clock       = document.getElementById("clock");
+    const button      = document.getElementById("startStop");
+    const avgValue    = document.getElementById("avgValue");
+    const countText   = document.getElementById("countText");
+    const orderList   = document.getElementById("orderList");
+    const clearButton = document.getElementById("clearAll");
+
+    // STEP B: Memory.
+    // "orders" is a list of finished orders. Each one remembers its name,
+    // how many seconds it took, and when it finished.
+    let orders = loadOrders();
+    let startTime = null;   // when the current order started (null = not running)
+    let ticker = null;      // the thing that updates the clock every second
+
+    // STEP C: Turn a number of seconds into "HH:MM:SS" so humans can read it.
+    function formatTime(totalSeconds) {
+      const h = Math.floor(totalSeconds / 3600);
+      const m = Math.floor((totalSeconds % 3600) / 60);
+      const s = Math.floor(totalSeconds % 60);
+      // padStart adds a leading zero, so 5 becomes "05"
+      return [h, m, s].map(n => String(n).padStart(2, "0")).join(":");
+    }
+
+    // STEP D: What happens when you click the big button.
+    button.addEventListener("click", function () {
+      if (startTime === null) {
+        // Not running -> START
+        startTime = Date.now();                  // note the current time
+        button.textContent = "Stop";
+        button.classList.add("running");         // turns the button red
+        ticker = setInterval(updateClock, 1000); // refresh clock every second
+        saveRunningTimer();
+      } else {
+        // Running -> STOP
+        const seconds = (Date.now() - startTime) / 1000;
+        orders.push({
+          name: nameBox.value.trim() || "Order " + (orders.length + 1),
+          seconds: seconds,
+          finished: new Date().toLocaleString()
+        });
+        startTime = null;
+        clearInterval(ticker);                   // stop refreshing the clock
+        button.textContent = "Start";
+        button.classList.remove("running");
+        clock.textContent = "00:00:00";
+        nameBox.value = "";                      // empty the box for the next order
+        saveOrders();
+        saveRunningTimer();
+        showOrders();
+      }
+    });
+
+    // STEP E: Update the big clock while an order is running.
+    function updateClock() {
+      const seconds = (Date.now() - startTime) / 1000;
+      clock.textContent = formatTime(seconds);
+    }
+
+    // STEP F: Draw the list of finished orders and work out the average.
+    function showOrders() {
+      orderList.innerHTML = ""; // wipe the old list, then rebuild it
+
+      // Show newest first
+      orders.slice().reverse().forEach(function (order) {
+        const item = document.createElement("li");
+
+        const info = document.createElement("div");
+        info.innerHTML = "<div></div><div class='when'></div>";
+        info.children[0].textContent = order.name + " — " + formatTime(order.seconds);
+        info.children[1].textContent = order.finished;
+
+        const del = document.createElement("button");
+        del.className = "small-btn";
+        del.textContent = "Delete";
+        del.addEventListener("click", function () {
+          orders.splice(orders.indexOf(order), 1); // remove this one order
+          saveOrders();
+          showOrders();
+        });
+
+        item.append(info, del);
+        orderList.append(item);
+      });
+
+      // AVERAGE = add up all the times, then divide by how many orders there are
+      if (orders.length === 0) {
+        avgValue.textContent = "—";
+        countText.textContent = "No orders recorded yet";
+      } else {
+        let total = 0;
+        orders.forEach(o => total += o.seconds);
+        avgValue.textContent = formatTime(total / orders.length);
+        countText.textContent = "Based on " + orders.length +
+          (orders.length === 1 ? " order" : " orders");
+      }
+    }
+
+    // STEP G: "Clear all" button wipes the history (after asking first).
+    clearButton.addEventListener("click", function () {
+      if (orders.length && confirm("Delete ALL recorded orders? This can't be undone.")) {
+        orders = [];
+        saveOrders();
+        showOrders();
+      }
+    });
+
+    // STEP H: Saving, so your data is still there after closing the browser.
+    // The browser has a small built-in storage box called "localStorage".
+    // "try/catch" means: try this, and if it fails, don't crash the page.
+    function saveOrders() {
+      try { localStorage.setItem("cycleOrders", JSON.stringify(orders)); } catch (e) {}
+    }
+    function loadOrders() {
+      try { return JSON.parse(localStorage.getItem("cycleOrders")) || []; } catch (e) { return []; }
+    }
+    // Also remember a timer that's still running, in case you close the tab mid-order
+    function saveRunningTimer() {
+      try {
+        if (startTime) {
+          localStorage.setItem("cycleRunning", JSON.stringify({ startTime, name: nameBox.value }));
+        } else {
+          localStorage.removeItem("cycleRunning");
+        }
+      } catch (e) {}
+    }
+    nameBox.addEventListener("input", saveRunningTimer);
+
+    // STEP I: When the page first opens, restore everything.
+    try {
+      const running = JSON.parse(localStorage.getItem("cycleRunning"));
+      if (running) {
+        startTime = running.startTime;
+        nameBox.value = running.name || "";
+        button.textContent = "Stop";
+        button.classList.add("running");
+        updateClock();
+        ticker = setInterval(updateClock, 1000);
+      }
+    } catch (e) {}
+    showOrders();
+  </script>
+</body>
+</html>
